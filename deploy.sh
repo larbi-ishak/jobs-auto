@@ -1,6 +1,7 @@
 #!/bin/bash
 # ============================================================
-# Job Agent — One-shot deploy script for Ubuntu VPS
+# Job Agent — One-shot deploy script for Linux VPS
+# Supports: Ubuntu/Debian (apt) and RHEL/Fedora/CentOS (dnf)
 # Run as: sudo bash deploy.sh
 # ============================================================
 
@@ -15,11 +16,29 @@ echo "=========================================="
 echo "  Job Agent — VPS Deployment"
 echo "=========================================="
 
+# ── Detect package manager ───────────────────────────────────
+if command -v dnf &> /dev/null; then
+    PKG_MGR="dnf"
+    PKG_INSTALL="dnf install -y"
+    echo "  Package manager: dnf (RHEL/Fedora/CentOS)"
+elif command -v apt-get &> /dev/null; then
+    PKG_MGR="apt"
+    PKG_INSTALL="apt-get install -y"
+    echo "  Package manager: apt-get (Ubuntu/Debian)"
+else
+    echo "  ERROR: Neither dnf nor apt-get found. Exiting."
+    exit 1
+fi
+
 # ── 1. System packages ───────────────────────────────────────
 echo ""
 echo "[1/7] Installing system packages..."
-apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip git
+if [ "$PKG_MGR" = "dnf" ]; then
+    dnf install -y python3 python3-pip python3-devel git
+else
+    apt-get update -qq
+    apt-get install -y -qq python3 python3-venv python3-pip git
+fi
 
 # ── 2. Clone repo ───────────────────────────────────────────
 echo ""
@@ -64,6 +83,15 @@ fi
 echo ""
 echo "[5/7] Setting up log directory..."
 mkdir -p "$LOG_DIR"
+
+# Create service user if it doesn't exist (dnf systems may not have 'ubuntu')
+if id "$SERVICE_USER" &> /dev/null; then
+    echo "  User '$SERVICE_USER' exists ✅"
+else
+    echo "  Creating user '$SERVICE_USER'..."
+    useradd -r -s /bin/bash "$SERVICE_USER" 2>/dev/null || true
+fi
+
 chown -R "$SERVICE_USER:$SERVICE_USER" "$LOG_DIR"
 
 # ── 6. Permissions ──────────────────────────────────────────
@@ -77,6 +105,12 @@ echo "[7/7] Installing systemd service..."
 cp "$INSTALL_DIR/job_agent.service" /etc/systemd/system/job_agent.service
 systemctl daemon-reload
 systemctl enable job_agent
+
+# ── Log rotation ────────────────────────────────────────────
+if [ -f "$INSTALL_DIR/logrotate.conf" ]; then
+    cp "$INSTALL_DIR/logrotate.conf" /etc/logrotate.d/job_agent
+    echo "  Log rotation installed ✅"
+fi
 
 echo ""
 echo "=========================================="
