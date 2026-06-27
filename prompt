@@ -1,0 +1,235 @@
+Build a Python job-hunting automation platform from scratch. Here are the full specifications:
+
+## Overview
+A multi-country job scraping agent that runs on a schedule, filters relevant jobs, scores them using an LLM, deduplicates, and sends a Telegram digest every 6 hours.
+
+---
+
+## Target Countries & Sources
+
+| Country | Job Sources |
+|---|---|
+| Germany | arbeitnow.com (free API, visa=true filter), Adzuna API (country=de) |
+| Canada | Adzuna API (country=ca), Remotive API |
+| France | Adzuna API (country=fr) |
+| Ireland | Adzuna API (country=ie) |
+
+Use Adzuna API (free tier, register at developer.adzuna.com for app_id and app_key).
+Use arbeitnow free public API: GET https://www.arbeitnow.com/api/job-board-api?visa=true
+
+---
+
+## Job Role Keywords (search these terms)
+- "cloud presales"
+- "solutions engineer"
+- "cloud architect"
+- "technical account manager"
+- "presales engineer"
+- "cloud engineer"
+- "devops engineer"
+- "pre-sales"
+
+---
+
+## Filtering Rules
+1. Must match at least one role keyword (title or description)
+2. Visa sponsorship: prefer jobs mentioning "visa sponsorship", "visa support", "relocation", "work permit" — flag these as priority
+3. Language: accept English-language postings OR postings that mention English as working language. Do NOT filter out non-English postings if they accept English speakers.
+4. Salary: if salary data is available, flag jobs BELOW the visa minimum threshold
+   as low priority (still include them). Thresholds by country:
+   - Germany: €45,000/year (Blue Card minimum for shortage occupations like IT)
+   - France: €43,000/year
+   - Canada: CAD 55,000/year
+   - Ireland: €32,000/year
+   If no salary data → include job normally, mark salary as "not specified"
+   Do NOT hard-filter out any job based on salary alone.
+5. Deduplicate by job URL — never send the same job twice
+
+---
+
+## Scoring (LLM-based)
+Use Huawei MaaS API (OpenAI-compatible endpoint).
+
+The base URL and API key will be provided as environment variables:
+- HUAWEI_MAAS_BASE_URL
+- HUAWEI_MAAS_API_KEY
+- HUAWEI_MAAS_MODEL (default: "glm-4" or configurable)
+
+Use the openai Python SDK pointed at the Huawei MaaS base URL.
+
+For each job, send this prompt to the LLM:
+"""
+You are a job relevance scorer. Score this job posting for a candidate with this profile:
+- Cloud presales engineer at Huawei, 3 years experience
+- Skills: HCS private cloud, GaussDB, Kubernetes, solution architecture, client presentations, RFP responses
+- Looking for: presales, solutions engineering, cloud architecture, or technical account management roles
+- Languages: French, English, Arabic
+- Requires visa sponsorship (non-EU, non-Canadian citizen)
+
+Job title: {title}
+Company: {company}
+Location: {location}
+Description (first 500 chars): {description[:500]}
+
+Respond ONLY with a JSON object: {"score": <1-10>, "reason": "<one sentence>", "visa_likely": <true/false>}
+"""
+
+Only call LLM for jobs that passed keyword filtering. Cache scores in SQLite.
+
+---
+
+## Storage — SQLite
+File: jobs.db
+
+Table: seen_jobs
+- id (TEXT PRIMARY KEY) — MD5 of job URL
+- url (TEXT)
+- title (TEXT)
+- company (TEXT)
+- location (TEXT)
+- country (TEXT)
+- salary (TEXT)
+- score (INTEGER)
+- visa_likely (BOOLEAN)
+- reason (TEXT)
+- source (TEXT)
+- first_seen (TIMESTAMP)
+- notified (BOOLEAN DEFAULT FALSE)
+
+---
+
+## Telegram Notification
+Environment variables:
+- TELEGRAM_BOT_TOKEN
+- TELEGRAM_CHAT_ID
+
+Every 6 hours, after scraping all sources:
+1. Query jobs where notified=FALSE and score >= 6, ordered by score DESC
+2. Send a digest message grouped by country
+3. Format each job as:
+🌍 GERMANY | Score: 8/10
+
+💼 Solutions Engineer — SAP
+
+📍 Berlin
+
+💰 €65,000/year
+
+🛂 Visa: Likely ✅
+
+📝 Strong presales fit, mentions relocation support
+
+🔗 https://...
+
+4. Send max 15 jobs per digest to avoid spam. If more exist, say "X more jobs available, next digest in 6h"
+5. Mark all sent jobs as notified=TRUE
+
+---
+
+## Scheduling
+Use APScheduler (BackgroundScheduler). Run the full pipeline every 6 hours.
+Also support a manual trigger: run with `python main.py --now` to force immediate run.
+
+---
+
+## Project Structure
+job_agent/
+
+├── main.py              # entry point, scheduler
+
+├── config.py            # all env vars and constants
+
+├── scrapers/
+
+│   ├── arbeitnow.py     # Germany arbeitnow API
+
+│   └── adzuna.py        # Adzuna multi-country
+       -- other scrapers will be added 
+base.py, register.py
+
+├── scorer.py            # LLM scoring via Huawei MaaS
+
+├── storage.py           # SQLite operations
+
+├── notifier.py          # Telegram bot
+
+└── requirements.txt
+
+---
+
+## Environment Variables (.env file)
+TELEGRAM_BOT_TOKEN=
+
+TELEGRAM_CHAT_ID=
+
+ADZUNA_APP_ID=
+
+ADZUNA_APP_KEY=
+
+HUAWEI_MAAS_BASE_URL=
+
+HUAWEI_MAAS_API_KEY=
+
+HUAWEI_MAAS_MODEL=glm-4
+
+---
+
+## Requirements
+httpx
+
+apscheduler
+
+python-dotenv
+
+openai
+
+sqlite3 (stdlib)
+
+python-telegram-bot
+
+---
+
+## Deployment notes
+- Target: GCP VM running Ubuntu
+- Add a systemd service file: job_agent.service
+- Service should restart on failure, log to /var/log/job_agent.log
+- Include a README with setup steps: clone, pip install, fill .env, systemctl enable
+
+---
+
+## Important constraints
+- Never crash on a single scraper failure — wrap each source in try/except, log error, continue
+- Rate limit: add 1–2 second delay between API calls
+- LLM call timeout: 10 seconds max, skip scoring if timeout (score = 0, reason = "scoring failed")
+- SQLite writes must be thread-safe (use check_same_thread=False + a threading lock)
+
+
+## Candidate Profile (used in LLM scoring)
+
+Load candidate profile from a file: candidate_profile.md
+This file contains the candidate's CV, skills, experience, and preferences.
+Read it once at startup and inject the full content into the LLM scoring prompt
+instead of the hardcoded profile description.
+
+candidate_profile.md structure (create a template):
+---
+## Experience
+[X years, roles, companies]
+
+## Technical Skills
+[list]
+
+## Languages
+[list]
+
+## Target Roles
+[list]
+
+## Preferences
+[visa sponsorship required: yes/no, remote/hybrid preference, etc.]
+---
+
+The scoring prompt should say:
+"Score this job for the following candidate:" + full contents of candidate_profile.md
+
+Build the complete working code for all files.

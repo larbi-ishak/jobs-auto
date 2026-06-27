@@ -1,0 +1,17 @@
+[Unit]
+Description=Job Agent — Automated Job Hunting Platform
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/job_agent/job_agent
+ExecStart=/opt/job_agent/venv/bin/python main.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/job_agent.log
+StandardError=append:/var/log/job_agent.log
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

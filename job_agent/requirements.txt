@@ -1,0 +1,5 @@
+httpx
+apscheduler
+python-dotenv
+openai
+python-telegram-bot
