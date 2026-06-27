@@ -85,24 +85,98 @@ python main.py
 
 ### 5. Deploy as systemd Service (GCP VM / Ubuntu)
 
+#### Option A: One-shot deploy script (recommended)
+
 ```bash
-# Copy service file
+# Clone and run the deploy script
+git clone https://github.com/larbi-ishak/jobs-auto.git /tmp/jobs-auto
+sudo bash /tmp/jobs-auto/deploy.sh
+```
+
+This will:
+- Install system packages (python3, git)
+- Clone the repo to `/opt/jobs-auto`
+- Create a Python venv and install dependencies
+- Copy `.env.example` → `.env` (edit it with your keys!)
+- Set up log directory and rotation
+- Install and enable the systemd service
+
+#### Option B: Manual setup
+
+```bash
+# Clone
+sudo git clone https://github.com/larbi-ishak/jobs-auto.git /opt/jobs-auto
+cd /opt/jobs-auto
+
+# Create venv
+python3 -m venv venv
+source venv/bin/activate
+pip install -r job_agent/requirements.txt
+
+# Configure
+cp .env.example .env
+nano .env  # Fill in your API keys
+
+# Set permissions
+sudo chown -R ubuntu:ubuntu /opt/jobs-auto
+
+# Install service
 sudo cp job_agent.service /etc/systemd/system/
-
-# Create log file
-sudo touch /var/log/job_agent.log
-sudo chown ubuntu:ubuntu /var/log/job_agent.log
-
-# Enable and start
+sudo mkdir -p /var/log/job_agent
+sudo chown -R ubuntu:ubuntu /var/log/job_agent
 sudo systemctl daemon-reload
 sudo systemctl enable job_agent
 sudo systemctl start job_agent
+```
+
+#### Service management
+
+```bash
+# Start / Stop / Restart
+sudo systemctl start job_agent
+sudo systemctl stop job_agent
+sudo systemctl restart job_agent
 
 # Check status
 sudo systemctl status job_agent
 
-# View logs
-tail -f /var/log/job_agent.log
+# View live logs
+tail -f /var/log/job_agent/service.log
+
+# View error logs
+tail -f /var/log/job_agent/error.log
+
+# Check recent pipeline runs
+grep "Pipeline run started" /var/log/job_agent/service.log | tail -5
+```
+
+#### Log rotation (prevents disk fill)
+
+```bash
+sudo cp logrotate.conf /etc/logrotate.d/job_agent
+```
+
+This rotates logs daily, keeps 14 days, compresses old logs.
+
+#### What the service does automatically
+
+| Feature | Behavior |
+|---|---|
+| Auto-start on boot | `systemctl enable` ensures it starts on VM boot |
+| Auto-restart on crash | `Restart=always` + `RestartSec=15` |
+| Crash loop protection | Max 5 restarts in 5 minutes, then backs off |
+| Network dependency | Waits for `network-online.target` before starting |
+| Scheduled pipeline | Runs every 6 hours via APScheduler |
+| Manual trigger | `sudo -u ubuntu /opt/jobs-auto/venv/bin/python /opt/jobs-auto/job_agent/main.py --now` |
+
+#### Monitoring (optional)
+
+```bash
+# Quick health check (add to cron for alerts)
+curl -s "https://api.telegram.org/bot$TOKEN/getMe" > /dev/null && echo "Telegram OK" || echo "Telegram FAIL"
+
+# Check if service is running
+systemctl is-active job_agent
 ```
 
 ## Pipeline Flow

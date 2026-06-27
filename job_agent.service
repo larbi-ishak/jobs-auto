@@ -1,17 +1,29 @@
 [Unit]
 Description=Job Agent — Automated Job Hunting Platform
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/opt/job_agent/job_agent
-ExecStart=/opt/job_agent/venv/bin/python main.py
-Restart=on-failure
-RestartSec=10
-StandardOutput=append:/var/log/job_agent.log
-StandardError=append:/var/log/job_agent.log
+Group=ubuntu
+WorkingDirectory=/opt/jobs-auto/job_agent
+ExecStart=/opt/jobs-auto/venv/bin/python main.py
+Restart=always
+RestartSec=15
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Logging
+StandardOutput=append:/var/log/job_agent/service.log
+StandardError=append:/var/log/job_agent/error.log
+
+# Environment
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/jobs-auto/job_agent
+
+# Resource limits
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
