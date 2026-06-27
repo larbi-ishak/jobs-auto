@@ -4,7 +4,7 @@ LLM-based job scoring via Huawei MaaS (OpenAI-compatible API).
 
 import json
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from openai import OpenAI
 
@@ -62,7 +62,7 @@ def get_candidate_profile() -> str:
 
 # ── OpenAI client (Huawei MaaS) ──────────────────────────────────────────────
 
-_client: OpenAI | None = None
+_client: Optional[OpenAI] = None
 
 
 def _normalize_base_url(url: str) -> str:

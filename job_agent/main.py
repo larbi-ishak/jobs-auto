@@ -12,6 +12,7 @@ import logging
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -69,7 +70,7 @@ def _check_salary_threshold(job: dict) -> str:
     return "above_threshold"
 
 
-def _extract_salary_number(salary_str: str) -> float | None:
+def _extract_salary_number(salary_str: str) -> Optional[float]:
     """Extract a numeric salary value from a formatted string."""
     import re
     cleaned = salary_str.replace("€", "").replace("CAD", "").replace("(est.)", "").strip()
